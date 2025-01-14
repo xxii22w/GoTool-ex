@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"os"
 
-	stdprometheus "github.com/prometheus/client_golang/prometheus"
 	kitprometheus "github.com/go-kit/kit/metrics/prometheus"
 	"github.com/go-kit/log"
+	stdprometheus "github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
@@ -18,6 +18,7 @@ import (
 var (
 	httpAddr = flag.String("http-addr", ":8080", "HTTP listen address")
 	grpcAddr = flag.String("grpc-addr", ":8972", "gRPC listen address")
+	trimAddr = flag.String("trim-addr", "127.0.0.1:8975", "trim——service地址")
 )
 
 /*
@@ -29,6 +30,12 @@ go-kit分为三层
 */
 
 func main() {
+	flag.Parse()
+
+	// LOG
+	logger := log.NewLogfmtLogger(os.Stderr)
+	bs := NewService()
+	bs = NewLogMiddleware(logger, bs)
 
 	// instrumentation
 	fieldKeys := []string{"method", "error"}
@@ -51,16 +58,22 @@ func main() {
 		Help:      "The result of each count method.",
 	}, []string{}) // no fields here
 
-	logger := log.NewLogfmtLogger(os.Stderr)
-	bs := NewService()
-	bs = NewLogMiddleware(logger, bs)
 	bs = instrumentingMiddleware{
 		requestCount:   requestCount,
 		requestLatency: requestLatency,
 		countResult:    countResult,
 		next:           bs,
 	}
-	
+
+	// 从consul获取trim service
+	trimEndpoint,err := getTrimServiceFromConsul("localhost:8500",logger,"trim_service",nil)
+	if err != nil {
+		fmt.Printf("connect %s failed, err: %v",*trimAddr,err)
+		return
+	}
+
+	bs = NewServiceWithTrim(trimEndpoint,bs)
+
 	var g errgroup.Group
 
 	// HTTP服务
@@ -73,6 +86,7 @@ func main() {
 		defer httpListener.Close()
 		logger := log.NewLogfmtLogger(os.Stderr)
 		httpHandler := NewHTTPServer(bs, logger)
+
 		return http.Serve(httpListener, httpHandler)
 	})
 

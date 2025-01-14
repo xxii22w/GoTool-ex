@@ -100,6 +100,19 @@ func decodeConcatRequest(ctx context.Context, r *http.Request) (interface{}, err
 	return request, nil
 }
 
+// encodeTrimRequest 将内部结构体转为protobuf中的结构体
+// 对外发起gRPC请求
+func encodeTrimRequest(_ context.Context, request interface{}) (interface{}, error) {
+	req := request.(trimRequest)
+	return &pb.TrimRequest{S: req.s}, nil
+}
+
+// decodeTrimResponse 将收到的gRPC响应转为内部的响应结构体
+func decodeTrimResponse(_ context.Context, response interface{}) (interface{}, error) {
+	resp := response.(*pb.TrimResponse)
+	return trimResponse{s: resp.S}, nil
+}
+
 func encodeResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
 	return json.NewEncoder(w).Encode(response)
 }

@@ -31,6 +31,8 @@ type instrumentingMiddleware struct {
 	next           AddService
 }
 
+
+
 func (mw logMiddleware) Sum(ctx context.Context, a, b int) (res int, err error) {
 	defer func(begin time.Time) {
 		mw.logger.Log(
@@ -114,4 +116,40 @@ func rateMiddleware(limit *rate.Limiter) endpoint.Middleware {
 			return next(ctx, request)
 		}
 	}
+}
+
+type withTrimMiddleware struct {
+	next AddService
+	trimService endpoint.Endpoint	// 通过它调用其他的服务
+}
+
+func NewServiceWithTrim(trimEndpoint endpoint.Endpoint, svc AddService) AddService {
+	return &withTrimMiddleware{
+		trimService: trimEndpoint,
+		next:        svc,
+	}
+}
+
+// 为 withTrimMiddleware 实现 AddService 接口
+func (tm withTrimMiddleware) Sum(ctx context.Context, a, b int) (res int, err error) {
+	return tm.next.Sum(ctx, a, b) // 复用之前的逻辑
+}
+
+func (tm withTrimMiddleware) Concat(ctx context.Context, a, b string) (res string, err error) {
+	// 需要新的逻辑处理
+	// 外部调用我们的Concat方法时
+	// 1. 发起RPC调用 trim_service 对数据进行处理 （调用其他服务/依赖其他的服务）
+	respA, err := tm.trimService(ctx, trimRequest{s: a}) // 执行，其实是作为客户端对外发起请求
+	if err != nil {
+		return "", err
+	}
+	respB, err := tm.trimService(ctx, trimRequest{s: b}) // 执行，其实是作为客户端对外发起请求
+	if err != nil {
+		return "", err
+	}
+	trimA := respA.(trimResponse) // 拿到处理后的响应
+	trimB := respB.(trimResponse) // 拿到处理后的响应
+
+	// 2. 拿到处理后的数据再拼接
+	return tm.next.Concat(ctx, trimA.s, trimB.s)
 }
